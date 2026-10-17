@@ -24,7 +24,7 @@ app.get("/api/health", (req, res) => {
 app.use("/api", apiRoutes);
 app.use((req, res) => res.status(404).json({ success: false, message: `Route not found: ${req.method} ${req.originalUrl}` }));
 
-// One error handler keeps controller code focused on the actual request.
+// global error handler 
 app.use((error, req, res, next) => {
   let status = error.status || 500;
   let message = error.message || "Server error";
