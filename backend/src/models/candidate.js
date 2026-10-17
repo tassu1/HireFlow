@@ -24,7 +24,6 @@ const candidateSchema = new mongoose.Schema(
       trim: true,
       lowercase: true,
       maxlength: 254,
-      // Enforced by MongoDB, not just by a check in the controller.
       unique: true,
     },
 
@@ -54,7 +53,7 @@ const candidateSchema = new mongoose.Schema(
   }
 );
 
-// Stage filter + newest first, and the "recently added" query.
+
 candidateSchema.index({ stage: 1, createdAt: -1 });
 candidateSchema.index({ createdAt: -1 });
 
