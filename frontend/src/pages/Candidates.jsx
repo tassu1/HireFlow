@@ -1,73 +1,46 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import "../styles/Candidates.css";
-import { api } from "../lib/api.jsx";
+import { api } from "../lib/api.js";
 import { STAGES } from "../lib/constants.js";
-import Icon from "../components/Icons.jsx";
 import CandidateTable from "../components/CandidateTable.jsx";
 import CandidateForm from "../components/CandidateForm.jsx";
-import { Modal, ConfirmDialog, Pagination, EmptyState, ErrorState, Loading } from "../components/UI.jsx";
-import { useToast } from "../components/Toast.jsx";
 
 export default function Candidates() {
-  const toast = useToast();
   const [params, setParams] = useSearchParams();
-
   const [search, setSearch] = useState("");
   const [stage, setStage] = useState("");
   const [page, setPage] = useState(1);
-  const [debouncedSearch, setDebouncedSearch] = useState(search);
-
-  useEffect(() => {
-    const timer = setTimeout(() => setDebouncedSearch(search), 300);
-    return () => clearTimeout(timer);
-  }, [search]);
-
   const [rows, setRows] = useState([]);
   const [pagination, setPagination] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
   const [busyId, setBusyId] = useState(null);
-
   const [formOpen, setFormOpen] = useState(params.get("new") === "1");
   const [editing, setEditing] = useState(null);
   const [deleting, setDeleting] = useState(null);
-
-  const requestId = useRef(0); // lets us ignore responses from outdated requests
-
-  const load = useCallback(async () => {
-    const id = ++requestId.current;
-    setLoading(true);
-    setError("");
-    try {
-      const data = await api.listCandidates({
-        search: debouncedSearch,
-        stage,
-        page,
-        limit: 10,
-      });
-      if (id !== requestId.current) return;
-
-      // The last row of the last page was removed: step back one page.
-      if (data.candidates.length === 0 && data.pagination.page > 1) {
-        setPage(data.pagination.totalPages);
-        return;
-      }
-      setRows(data.candidates);
-      setPagination(data.pagination);
-    } catch (err) {
-      if (id === requestId.current) setError(err.message);
-    } finally {
-      if (id === requestId.current) setLoading(false);
-    }
-  }, [debouncedSearch, stage, page]);
+  const [refresh, setRefresh] = useState(0);
 
   useEffect(() => {
-    // Fetching on filter/page change is an intentional effect: load() flags
-    // "loading" first so the table dims while the new results arrive.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    load();
-  }, [load]);
+    const timer = setTimeout(async () => {
+      setLoading(true);
+      setError("");
+      try {
+        const data = await api.listCandidates({ search, stage, page, limit: 10 });
+        if (!data.candidates.length && data.pagination.page > 1) {
+          setPage(data.pagination.totalPages);
+          return;
+        }
+        setRows(data.candidates);
+        setPagination(data.pagination);
+      } catch (err) {
+        setError(err.message);
+      } finally {
+        setLoading(false);
+      }
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [search, stage, page, refresh]);
 
   function closeForm() {
     setFormOpen(false);
@@ -75,147 +48,60 @@ export default function Candidates() {
     if (params.has("new")) setParams({}, { replace: true });
   }
 
-  async function handleSave(values) {
-    if (editing) {
-      await api.updateCandidate(editing._id, values);
-      toast("success", "Candidate updated");
-    } else {
-      await api.createCandidate(values);
-      toast("success", "Candidate added");
+  async function saveCandidate(values) {
+    try {
+      if (editing) await api.updateCandidate(editing._id, values);
+      else await api.createCandidate(values);
+      setMessage(editing ? "Candidate updated." : "Candidate added.");
+      closeForm();
       setSearch("");
       setStage("");
       setPage(1);
+      setRefresh((value) => value + 1);
+    } catch (err) {
+      setMessage(err.message);
+      throw err;
     }
-    closeForm();
-    load();
   }
 
-  async function handleStageChange(candidate, next) {
-    if (next === candidate.stage) return;
+  async function changeStage(candidate, nextStage) {
+    if (nextStage === candidate.stage) return;
     setBusyId(candidate._id);
     try {
-      await api.updateCandidate(candidate._id, { stage: next });
-      toast("success", `${candidate.name} moved to ${next}`);
-      await load();
-    } catch (err) {
-      toast("error", err.message);
-    } finally {
-      setBusyId(null);
-    }
+      await api.updateCandidate(candidate._id, { stage: nextStage });
+      setMessage(`${candidate.name} moved to ${nextStage}.`);
+      setRefresh((value) => value + 1);
+    } catch (err) { setMessage(err.message); }
+    finally { setBusyId(null); }
   }
 
-  async function handleDelete() {
+  async function deleteCandidate() {
     try {
       await api.deleteCandidate(deleting._id);
-      toast("success", "Candidate deleted");
+      setMessage("Candidate deleted.");
       setDeleting(null);
-      load();
-    } catch (err) {
-      toast("error", err.message);
-      setDeleting(null);
-    }
+      setRefresh((value) => value + 1);
+    } catch (err) { setMessage(err.message); setDeleting(null); }
   }
 
-  function clearFilters() {
-    setSearch("");
-    setStage("");
-    setPage(1);
-  }
+  const filtered = Boolean(search || stage);
 
-  const filtered = Boolean(debouncedSearch || stage);
-
-  return (
-    <div className="stack">
-      <div className="page-head">
-        <p className="muted">Search, filter and move candidates through the pipeline.</p>
-        <button className="btn btn-primary" onClick={() => setFormOpen(true)}>
-          <Icon name="plus" /> Add candidate
-        </button>
-      </div>
-
-      <div className="filters">
-        <div className="search">
-          <Icon name="search" size={16} />
-          <input
-            className="input"
-            type="search"
-            placeholder="Search by name, email or job title"
-            aria-label="Search candidates"
-            value={search}
-            onChange={(e) => {
-              setSearch(e.target.value);
-              setPage(1);
-            }}
-          />
-        </div>
-        <select
-          className="input filter-stage"
-          aria-label="Filter by stage"
-          value={stage}
-          onChange={(e) => {
-            setStage(e.target.value);
-            setPage(1);
-          }}
-        >
-          <option value="">All stages</option>
-          {STAGES.map((s) => (
-            <option key={s} value={s}>{s}</option>
-          ))}
-        </select>
-      </div>
-
-      <div className="card clip">
-        {loading && rows.length === 0 ? (
-          <Loading label="Loading candidates..." />
-        ) : error ? (
-          <ErrorState message={error} onRetry={load} />
-        ) : rows.length === 0 ? (
-          filtered ? (
-            <EmptyState
-              title="No candidates match your filters"
-              hint="Try a different search term or clear the stage filter."
-              action={<button className="btn btn-secondary" onClick={clearFilters}>Clear filters</button>}
-            />
-          ) : (
-            <EmptyState
-              title="No candidates yet"
-              hint="Add a candidate who applied for a position to get started."
-              action={
-                <button className="btn btn-primary" onClick={() => setFormOpen(true)}>
-                  <Icon name="plus" /> Add candidate
-                </button>
-              }
-            />
-          )
-        ) : (
-          <div className={loading ? "dim" : ""}>
-            <CandidateTable
-              candidates={rows}
-              busyId={busyId}
-              onStageChange={handleStageChange}
-              onEdit={setEditing}
-              onDelete={setDeleting}
-            />
-            {pagination && <Pagination pagination={pagination} onPage={setPage} />}
-          </div>
-        )}
-      </div>
-
-      {(formOpen || editing) && (
-        <Modal title={editing ? "Edit candidate" : "Add candidate"} onClose={closeForm}>
-          <CandidateForm initial={editing || undefined} onSubmit={handleSave} onCancel={closeForm} />
-        </Modal>
-      )}
-
-      {deleting && (
-        <ConfirmDialog
-          title="Delete candidate"
-          message={`Delete ${deleting.name}? This permanently removes the candidate and cannot be undone.`}
-          confirmLabel="Delete"
-          onConfirm={handleDelete}
-          onClose={() => setDeleting(null)}
-        />
-      )}
+  return <div className="stack">
+    <div className="page-head"><p className="muted">Search, filter and move candidates through the pipeline.</p><button className="btn btn-primary" onClick={() => setFormOpen(true)}>＋ Add candidate</button></div>
+    {message && <div className="notice" role="status">{message}<button className="link" onClick={() => setMessage("")}>Dismiss</button></div>}
+    <div className="filters"><div className="search"><input className="input" type="search" placeholder="Search by name, email or job title" aria-label="Search candidates" value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} /></div>
+      <select className="input filter-stage" aria-label="Filter by stage" value={stage} onChange={(e) => { setStage(e.target.value); setPage(1); }}><option value="">All stages</option>{STAGES.map((s) => <option key={s}>{s}</option>)}</select>
     </div>
-  );
+    <div className="card clip">
+      {loading && rows.length === 0 ? <div className="state"><p className="muted">Loading candidates...</p></div>
+        : error ? <div className="state"><p className="state-title">Could not load candidates</p><p className="muted">{error}</p><button className="btn btn-secondary" onClick={() => setRefresh((value) => value + 1)}>Try again</button></div>
+        : rows.length === 0 ? <div className="state"><p className="state-title">{filtered ? "No candidates match your filters" : "No candidates yet"}</p><p className="muted">{filtered ? "Try a different search or stage." : "Add a candidate to get started."}</p>{filtered ? <button className="btn btn-secondary" onClick={() => { setSearch(""); setStage(""); }}>Clear filters</button> : <button className="btn btn-primary" onClick={() => setFormOpen(true)}>＋ Add candidate</button>}</div>
+        : <div className={loading ? "dim" : ""}><CandidateTable candidates={rows} busyId={busyId} onStageChange={changeStage} onEdit={setEditing} onDelete={setDeleting} />
+          {pagination && <div className="pagination"><span>Showing {rows.length ? (page - 1) * 10 + 1 : 0}-{Math.min(page * 10, pagination.total)} of {pagination.total}</span><div className="pagination-controls"><button className="btn btn-secondary" disabled={page <= 1} onClick={() => setPage(page - 1)}>← Previous</button><span>Page {page} of {pagination.totalPages}</span><button className="btn btn-secondary" disabled={page >= pagination.totalPages} onClick={() => setPage(page + 1)}>Next →</button></div></div>}
+        </div>}
+    </div>
+
+    {(formOpen || editing) && <div className="modal-backdrop" onMouseDown={closeForm}><div className="modal" role="dialog" aria-modal="true" aria-label={editing ? "Edit candidate" : "Add candidate"} onMouseDown={(event) => event.stopPropagation()}><div className="modal-head"><h2>{editing ? "Edit candidate" : "Add candidate"}</h2><button className="icon-btn" onClick={closeForm} aria-label="Close">×</button></div><div className="modal-body"><CandidateForm initial={editing || undefined} onSubmit={saveCandidate} onCancel={closeForm} /></div></div></div>}
+    {deleting && <div className="modal-backdrop" onMouseDown={() => setDeleting(null)}><div className="modal" role="dialog" aria-modal="true" aria-label="Delete candidate" onMouseDown={(event) => event.stopPropagation()}><div className="modal-head"><h2>Delete candidate</h2><button className="icon-btn" onClick={() => setDeleting(null)} aria-label="Close">×</button></div><div className="modal-body"><p>Delete {deleting.name}? This cannot be undone.</p><div className="form-actions"><button className="btn btn-secondary" onClick={() => setDeleting(null)}>Cancel</button><button className="btn btn-danger" onClick={deleteCandidate}>Delete</button></div></div></div></div>}
+  </div>;
 }

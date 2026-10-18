@@ -1,115 +1,33 @@
 import { useState } from "react";
-import { ApiError } from "../lib/api.jsx";
 import { STAGES } from "../lib/constants.js";
-
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
-
-function validate(values) {
-  const errors = {};
-  if (!values.name.trim()) errors.name = "Name is required";
-  if (!values.email.trim()) errors.email = "Email is required";
-  else if (!EMAIL_RE.test(values.email.trim())) errors.email = "Enter a valid email address";
-  if (!values.jobTitle.trim()) errors.jobTitle = "Job title is required";
-  if (values.resumeUrl.trim()) {
-    try {
-      const url = new URL(values.resumeUrl.trim());
-      if (!/^https?:$/.test(url.protocol)) throw new Error();
-    } catch {
-      errors.resumeUrl = "Enter a valid http(s) URL";
-    }
-  }
-  return errors;
-}
 
 export default function CandidateForm({ initial, onSubmit, onCancel }) {
   const [values, setValues] = useState({
-    name: initial?.name ?? "",
-    email: initial?.email ?? "",
-    phone: initial?.phone ?? "",
-    jobTitle: initial?.jobTitle ?? "",
-    resumeUrl: initial?.resumeUrl ?? "",
-    stage: initial?.stage ?? "Applied",
-    notes: initial?.notes ?? "",
+    name: initial?.name || "", email: initial?.email || "", phone: initial?.phone || "",
+    jobTitle: initial?.jobTitle || "", resumeUrl: initial?.resumeUrl || "",
+    stage: initial?.stage || "Applied", notes: initial?.notes || "",
   });
-  const [errors, setErrors] = useState({});
-  const [formError, setFormError] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+  function change(event) { setValues({ ...values, [event.target.name]: event.target.value }); }
 
-  const change = (key) => (e) => {
-    setValues((v) => ({ ...v, [key]: e.target.value }));
-    if (errors[key]) setErrors((errs) => ({ ...errs, [key]: "" }));
-  };
-
-  async function handleSubmit(e) {
-    e.preventDefault();
-    setFormError("");
-
-    const found = validate(values);
-    setErrors(found);
-    if (Object.keys(found).length) return;
-
-    setBusy(true);
-    try {
-      await onSubmit(values);
-    } catch (err) {
-      if (err instanceof ApiError && Object.keys(err.fieldErrors).length) {
-        setErrors(err.fieldErrors);
-      } else {
-        setFormError(err.message || "Something went wrong. Please try again.");
-      }
-    } finally {
-      setBusy(false);
-    }
+  async function submit(event) {
+    event.preventDefault();
+    setSaving(true);
+    setError("");
+    try { await onSubmit(values); }
+    catch (err) { setError(err.message || "Could not save candidate."); }
+    finally { setSaving(false); }
   }
 
-  const field = (key, label, input, required = false) => (
-    <div className="field">
-      <label htmlFor={`f-${key}`}>
-        {label} {required && <span className="req" aria-hidden="true">*</span>}
-      </label>
-      {input}
-      {errors[key] && <p className="field-error" role="alert">{errors[key]}</p>}
-    </div>
-  );
-
-  const cls = (key) => `input ${errors[key] ? "input-error" : ""}`;
-
-  return (
-    <form onSubmit={handleSubmit} noValidate className="form">
-      {formError && <div className="form-error" role="alert">{formError}</div>}
-
-      {field("name", "Full name",
-        <input id="f-name" className={cls("name")} value={values.name} onChange={change("name")} maxLength={100} autoFocus />, true)}
-
-      {field("email", "Email",
-        <input id="f-email" type="email" className={cls("email")} value={values.email} onChange={change("email")} maxLength={254} />, true)}
-
-      <div className="form-grid">
-        {field("jobTitle", "Job title",
-          <input id="f-jobTitle" className={cls("jobTitle")} value={values.jobTitle} onChange={change("jobTitle")} maxLength={100} />, true)}
-        {field("phone", "Phone",
-          <input id="f-phone" type="tel" className={cls("phone")} value={values.phone} onChange={change("phone")} maxLength={20} />)}
-      </div>
-
-      {field("resumeUrl", "Resume URL",
-        <input id="f-resumeUrl" type="url" placeholder="https://" className={cls("resumeUrl")} value={values.resumeUrl} onChange={change("resumeUrl")} maxLength={500} />)}
-
-      {field("stage", "Hiring stage",
-        <select id="f-stage" className={cls("stage")} value={values.stage} onChange={change("stage")}>
-          {STAGES.map((s) => <option key={s}>{s}</option>)}
-        </select>)}
-
-      {field("notes", "Notes",
-        <textarea id="f-notes" rows={3} className={cls("notes")} value={values.notes} onChange={change("notes")} maxLength={2000} />)}
-
-      <div className="form-actions">
-        <button type="button" className="btn btn-secondary" onClick={onCancel} disabled={busy}>
-          Cancel
-        </button>
-        <button type="submit" className="btn btn-primary" disabled={busy}>
-          {busy ? "Saving..." : initial ? "Save changes" : "Add candidate"}
-        </button>
-      </div>
-    </form>
-  );
+  return <form className="form" onSubmit={submit}>
+    {error && <p className="form-error" role="alert">{error}</p>}
+    <div className="field"><label htmlFor="name">Full name *</label><input id="name" name="name" className="input" value={values.name} onChange={change} required /></div>
+    <div className="field"><label htmlFor="email">Email *</label><input id="email" name="email" type="email" className="input" value={values.email} onChange={change} required /></div>
+    <div className="form-grid"><div className="field"><label htmlFor="jobTitle">Job title *</label><input id="jobTitle" name="jobTitle" className="input" value={values.jobTitle} onChange={change} required /></div><div className="field"><label htmlFor="phone">Phone</label><input id="phone" name="phone" type="tel" className="input" value={values.phone} onChange={change} /></div></div>
+    <div className="field"><label htmlFor="resumeUrl">Resume URL</label><input id="resumeUrl" name="resumeUrl" type="url" placeholder="https://" className="input" value={values.resumeUrl} onChange={change} /></div>
+    <div className="field"><label htmlFor="stage">Hiring stage</label><select id="stage" name="stage" className="input" value={values.stage} onChange={change}>{STAGES.map((stage) => <option key={stage}>{stage}</option>)}</select></div>
+    <div className="field"><label htmlFor="notes">Notes</label><textarea id="notes" name="notes" rows={3} className="input" value={values.notes} onChange={change} /></div>
+    <div className="form-actions"><button type="button" className="btn btn-secondary" onClick={onCancel} disabled={saving}>Cancel</button><button type="submit" className="btn btn-primary" disabled={saving}>{saving ? "Saving..." : initial ? "Save changes" : "Add candidate"}</button></div>
+  </form>;
 }
