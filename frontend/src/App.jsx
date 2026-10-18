@@ -19,7 +19,6 @@ function Layout() {
         <NavLink to="/" end onClick={() => setMenuOpen(false)} className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`}>▦ Dashboard</NavLink>
         <NavLink to="/candidates" onClick={() => setMenuOpen(false)} className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`}>♙ Candidates</NavLink>
       </nav>
-      <p className="sidebar-foot">Mini ATS</p>
     </aside>
     <div className="main">
       <header className="topbar"><button className="icon-btn menu-btn" onClick={() => setMenuOpen(true)} aria-label="Open menu">☰</button><h1>{title}</h1></header>
